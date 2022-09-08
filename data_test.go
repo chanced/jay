@@ -14,6 +14,38 @@ type Obj struct {
 	V string `json:"v"`
 }
 
+type Nested struct {
+	Received []byte
+}
+
+func (n *Nested) UnmarshalJSON(data []byte) error {
+	n.Received = data
+	return nil
+}
+
+type Parent struct {
+	unmarshalFn func([]byte) error
+	Nested      Nested `json:"nested"`
+}
+
+func TestIsObject(t *testing.T) {
+	m := map[string]map[string]string{
+		"nested": {
+			"val": "value",
+		},
+		"somethingElse": {},
+		"other":         {},
+	}
+	b, _ := json.Marshal(m)
+	assert := require.New(t)
+
+	assert.True(jay.IsObject(b))
+	var p Parent
+	json.Unmarshal(b, &p)
+
+	assert.Equal(`{"val":"value"}`, string(p.Nested.Received))
+}
+
 func TestJSON(t *testing.T) {
 	assert := require.New(t)
 	data, err := json.Marshal(nil)

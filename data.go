@@ -4,10 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"unicode"
 )
-
-var Null = Data("null")
 
 type Data []byte
 
@@ -16,7 +13,7 @@ func (d Data) Len() int {
 }
 
 func (d Data) MarshalJSON() ([]byte, error) {
-	if d == nil || len(d) == 0 {
+	if d == nil {
 		return Null, nil
 	}
 
@@ -25,54 +22,32 @@ func (d Data) MarshalJSON() ([]byte, error) {
 
 func (d *Data) UnmarshalJSON(data []byte) error {
 	if d == nil {
-		return errors.New("dynamic.RawMessage: UnmarshalJSON on nil pointer")
+		return errors.New("jay: UnmarshalJSON on nil pointer")
 	}
 	*d = append((*d)[0:0], data...)
 	return nil
 }
 
 func (d Data) IsObject() bool {
-	for _, v := range d {
-		if !unicode.IsSpace(rune(v)) {
-			return v == '{'
-		}
-	}
-	return false
+	return IsObject(d)
 }
 
 func (d Data) IsEmptyObject() bool {
-	return d.IsObject() && len(d) == 2
+	return IsEmptyObject(d) && isEmpty(d)
 }
 
 func (d Data) IsEmptyArray() bool {
-	if !d.IsArray() {
-		return false
-	}
-	count := 0
-	for _, v := range d {
-		if !unicode.IsSpace(rune(v)) {
-			count += 1
-			if count > 2 {
-				return false
-			}
-		}
-	}
-	return count == 2
+	return IsEmptyArray(d)
 }
 
 // IsArray reports whether the data is a json array. It does not check whether
 // the json is malformed.
 func (d Data) IsArray() bool {
-	for _, v := range d {
-		if !unicode.IsSpace(rune(v)) {
-			return v == '['
-		}
-	}
-	return false
+	return IsArray(d)
 }
 
 func (d Data) IsNull() bool {
-	return bytes.Equal(d, Null)
+	return IsNull(d)
 }
 
 // IsBool reports true if data appears to be a json boolean value. It is
@@ -89,7 +64,7 @@ func (d Data) IsBool() bool {
 //
 // IsTrue does not parse strings
 func (d Data) IsTrue() bool {
-	return len(d) == 4 && d[0] == 't'
+	return IsTrue(d)
 }
 
 // IsFalse reports true if data appears to be a json boolean value of false. It is
@@ -98,7 +73,7 @@ func (d Data) IsTrue() bool {
 //
 // IsFalse does not parse strings
 func (d Data) IsFalse() bool {
-	return len(d) == 5 && d[0] == 'f'
+	return IsFalse(d)
 }
 
 func (d Data) Equal(data []byte) bool {
@@ -116,36 +91,12 @@ func (d Data) ContainsEscapeRune() bool {
 	return false
 }
 
-// UnquotedString trims double quotes from the bytes. It does not parse for
-// escaped characters
-func (d Data) UnquotedString() string {
-	if len(d) < 2 {
-		return string(d)
-	}
-
-	if d[0] == '"' && d[len(d)-1] == '"' {
-		return string(d[1 : len(d)-1])
-	}
-	return string(d)
-}
-
 func (d Data) IsNumber() bool {
-	if len(d) == 0 {
-		return false
-	}
-	switch d[0] {
-	case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '-':
-		return true
-	default:
-		return false
-	}
+	return IsNumber(d)
 }
 
 func (d Data) IsString() bool {
-	if len(d) == 0 {
-		return false
-	}
-	return d[0] == '"'
+	return IsString(d)
 }
 
 type Object map[string]Data
@@ -162,4 +113,70 @@ func (obj *Object) UnmarshalJSON(data []byte) error {
 	}
 	*obj = m
 	return nil
+}
+
+func IsEmptyObject(d []byte) bool {
+	return IsObject(bytes.TrimSpace(d)) && len(d) == 2
+}
+
+// IsValid reports whether s is a valid JSON number literal.
+//
+// Taken from encoding/json/scanner.go
+func IsNumber(data []byte) bool {
+	// This function implements the JSON numbers grammar.
+	// See https://tools.ietf.org/html/rfc7159#section-6
+	// and https://www.json.org/img/number.png
+
+	if len(data) == 0 {
+		return false
+	}
+
+	// Optional -
+	if data[0] == '-' {
+		data = data[1:]
+		if len(data) == 0 {
+			return false
+		}
+	}
+
+	// Digits
+	switch {
+	default:
+		return false
+
+	case data[0] == '0':
+		data = data[1:]
+
+	case '1' <= data[0] && data[0] <= '9':
+		data = data[1:]
+		for len(data) > 0 && '0' <= data[0] && data[0] <= '9' {
+			data = data[1:]
+		}
+	}
+
+	// . followed by 1 or more digits.
+	if len(data) >= 2 && data[0] == '.' && '0' <= data[1] && data[1] <= '9' {
+		data = data[2:]
+		for len(data) > 0 && '0' <= data[0] && data[0] <= '9' {
+			data = data[1:]
+		}
+	}
+
+	// e or E followed by an optional - or + and
+	// 1 or more digits.
+	if len(data) >= 2 && (data[0] == 'e' || data[0] == 'E') {
+		data = data[1:]
+		if data[0] == '+' || data[0] == '-' {
+			data = data[1:]
+			if len(data) == 0 {
+				return false
+			}
+		}
+		for len(data) > 0 && '0' <= data[0] && data[0] <= '9' {
+			data = data[1:]
+		}
+	}
+
+	// Make sure we are at the end.
+	return len(data) == 0
 }
